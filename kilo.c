@@ -21,6 +21,8 @@ struct editorConfig {
   struct termios original_termios;
 };
 
+enum editorKey { ARROW_UP = 1000, ARROW_RIGHT, ARROW_LEFT, ARROW_DOWN };
+
 struct editorConfig E;
 
 /*** terminal ***/
@@ -55,7 +57,7 @@ void enableRawMode() {
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
-char editorReadKey() {
+int editorReadKey() {
   int nread;
   char c;
   while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
@@ -63,6 +65,33 @@ char editorReadKey() {
       die("read");
     }
   }
+
+  if (c == '\x1b') {
+    char seq[3];
+
+    if (read(STDIN_FILENO, &seq[0], 1) != 1) {
+      return '\x1b';
+    }
+    if (read(STDIN_FILENO, &seq[1], 1) != 1) {
+      return '\x1b';
+    }
+
+    if (seq[0] == '[') {
+      switch (seq[1]) {
+      case 'A':
+        return ARROW_UP;
+      case 'B':
+        return ARROW_DOWN;
+      case 'C':
+        return ARROW_RIGHT;
+      case 'D':
+        return ARROW_LEFT;
+      }
+    }
+
+    return '\x1b';
+  }
+
   return c;
 }
 
@@ -130,14 +159,38 @@ void abAppend(struct abuf *ab, const char *s, int len) {
 void abFree(struct abuf *ab) { free(ab->b); };
 
 /*** input ***/
+void editorMoveCursor(int key) {
+  switch (key) {
+  case ARROW_UP:
+    E.cy--;
+    break;
+  case ARROW_DOWN:
+    E.cy++;
+    break;
+  case ARROW_LEFT:
+    E.cx--;
+    break;
+  case ARROW_RIGHT:
+    E.cx++;
+    break;
+  }
+}
+
 void editorProcessKeyPress() {
-  char c = editorReadKey();
+  int c = editorReadKey();
 
   switch (c) {
   case CTRL_KEY('q'):
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H", 3);
     exit(0);
+    break;
+
+  case ARROW_UP:
+  case ARROW_LEFT:
+  case ARROW_DOWN:
+  case ARROW_RIGHT:
+    editorMoveCursor(c);
     break;
   }
 }
@@ -181,7 +234,7 @@ void editorRefreshScreen() {
   editorDrawRows(&ab);
 
   char buf[32];
-  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy, E.cx);
   abAppend(&ab, buf, strlen(buf));
   abAppend(&ab, "\x1b[?25h", 6);
 
